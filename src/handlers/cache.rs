@@ -54,7 +54,7 @@ pub async fn get_handler(
 pub fn cache_routes(state: AppState) -> Router {
     Router::new()
         .route(
-            "/v1/cache/:hash",
+            "/v1/cache/{hash}",
             axum::routing::put(put_handler).get(get_handler),
         )
         .with_state(state)
