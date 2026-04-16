@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use axum::{
     extract::FromRequestParts,
     http::{header, request::Parts, StatusCode},
@@ -7,7 +6,6 @@ use axum::{
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AuthToken
 where
     S: Send + Sync,
