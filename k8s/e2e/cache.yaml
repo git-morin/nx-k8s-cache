@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache
+  namespace: e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+        - name: cache
+          image: nx-cache-server:ci
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NX_CACHE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cache-secret
+                  key: token
+            - name: NX_CACHE_DIR
+              value: /cache
+          volumeMounts:
+            - name: cache-storage
+              mountPath: /cache
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 1
+            periodSeconds: 2
+      volumes:
+        - name: cache-storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cache
+  namespace: e2e
+spec:
+  selector:
+    app: cache
+  ports:
+    - port: 8080
+      targetPort: 8080

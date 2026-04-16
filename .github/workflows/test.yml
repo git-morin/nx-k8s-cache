@@ -1,0 +1,126 @@
+name: Test Cache Server
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      NX_CACHE_TOKEN: ci-test-token
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build cache server
+        run: cargo build --release
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Create test Nx workspace
+        run: |
+          mkdir test-workspace
+
+          cat > test-workspace/package.json << 'EOF'
+          {
+            "name": "test-workspace",
+            "devDependencies": {
+              "nx": "^20.8.0"
+            }
+          }
+          EOF
+
+          cat > test-workspace/nx.json << 'EOF'
+          {
+            "targetDefaults": {
+              "build": {
+                "cache": true
+              }
+            }
+          }
+          EOF
+
+          mkdir -p test-workspace/apps/myapp
+
+          cat > test-workspace/apps/myapp/project.json << 'EOF'
+          {
+            "name": "myapp",
+            "targets": {
+              "build": {
+                "executor": "nx:run-commands",
+                "outputs": ["{projectRoot}/dist"],
+                "options": {
+                  "command": "mkdir -p apps/myapp/dist && echo built > apps/myapp/dist/output.txt"
+                },
+                "cache": true
+              }
+            }
+          }
+          EOF
+
+          cd test-workspace && npm install
+
+      - name: Start cache server
+        run: |
+          mkdir -p /tmp/nx-cache
+          NX_CACHE_DIR=/tmp/nx-cache NX_CACHE_TOKEN=$NX_CACHE_TOKEN \
+            ./target/release/nx-cache-server &
+          echo "CACHE_SERVER_PID=$!" >> $GITHUB_ENV
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/ && break
+            [ $i -eq 30 ] && { echo "Cache server failed to start"; exit 1; }
+            sleep 1
+          done
+
+      - name: First build — populates remote cache
+        working-directory: test-workspace
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://localhost:8080
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ env.NX_CACHE_TOKEN }}
+          NX_DAEMON: "false"
+        run: npx nx build myapp
+
+      - name: Verify entry was stored on server
+        run: |
+          count=$(ls /tmp/nx-cache | wc -l)
+          echo "Remote cache entries: $count"
+          [ "$count" -gt 0 ] || { echo "ERROR: nothing was stored in remote cache"; exit 1; }
+
+      - name: Reset local cache and delete outputs
+        working-directory: test-workspace
+        run: |
+          npx nx reset
+          rm -rf apps/myapp/dist
+
+      - name: Second build — should restore from remote cache
+        working-directory: test-workspace
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://localhost:8080
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ env.NX_CACHE_TOKEN }}
+          NX_DAEMON: "false"
+        run: |
+          npx nx build myapp
+          [ -f apps/myapp/dist/output.txt ] || { echo "ERROR: dist was not restored from remote cache"; exit 1; }
+
+      - name: Stop cache server
+        if: always()
+        run: kill $CACHE_SERVER_PID 2>/dev/null || true

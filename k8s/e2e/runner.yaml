@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-script
+  namespace: e2e
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "==> Setting up Nx workspace"
+    mkdir /workspace && cd /workspace
+
+    cat > package.json << 'PKGJSON'
+    {
+      "name": "test-workspace",
+      "devDependencies": {
+        "nx": "^20.8.0"
+      }
+    }
+    PKGJSON
+
+    cat > nx.json << 'NXJSON'
+    {
+      "targetDefaults": {
+        "build": {
+          "cache": true
+        }
+      }
+    }
+    NXJSON
+
+    mkdir -p apps/myapp
+
+    cat > apps/myapp/project.json << 'PROJJSON'
+    {
+      "name": "myapp",
+      "root": "apps/myapp",
+      "targets": {
+        "build": {
+          "executor": "nx:run-commands",
+          "outputs": ["{projectRoot}/dist"],
+          "options": {
+            "command": "mkdir -p apps/myapp/dist && date +%s%N > apps/myapp/dist/build-id"
+          },
+          "cache": true
+        }
+      }
+    }
+    PROJJSON
+
+    echo "==> Installing dependencies"
+    npm install --prefer-offline
+
+    echo "==> First build (populates remote cache)"
+    npx nx build myapp
+
+    first_id=$(cat apps/myapp/dist/build-id)
+    echo "    build-id: $first_id"
+
+    echo "==> Resetting local cache and deleting outputs"
+    npx nx reset
+    rm -rf apps/myapp/dist
+
+    echo "==> Second build (should restore from remote cache)"
+    npx nx build myapp
+
+    second_id=$(cat apps/myapp/dist/build-id)
+    echo "    build-id: $second_id"
+
+    if [ "$first_id" != "$second_id" ]; then
+      echo "FAIL: build-ids differ — command was re-executed instead of restoring from remote cache"
+      exit 1
+    fi
+
+    echo "PASS: build-ids match — remote cache round-trip confirmed"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: runner
+  namespace: e2e
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-cache
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - |
+              until wget -qO- http://cache:8080/; do
+                echo "waiting for cache server..."
+                sleep 2
+              done
+      containers:
+        - name: runner
+          image: node:20-slim
+          env:
+            - name: NX_SELF_HOSTED_REMOTE_CACHE_SERVER
+              value: http://cache:8080
+            - name: NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cache-secret
+                  key: token
+            - name: NX_DAEMON
+              value: "false"
+          command: ["/bin/bash", "/scripts/run.sh"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: runner-script
+            defaultMode: 0755
