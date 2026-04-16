@@ -49,8 +49,8 @@ data:
     }
     PROJJSON
 
-    echo "==> Installing dependencies"
-    npm install --prefer-offline
+    echo "==> Copying pre-installed node_modules"
+    cp -r /nx-template/node_modules /workspace/node_modules
 
     echo "==> First build (populates remote cache)"
     npx nx build myapp
@@ -88,17 +88,19 @@ spec:
       initContainers:
         - name: wait-for-cache
           image: busybox:stable
+          imagePullPolicy: Never
           command:
             - sh
             - -c
             - |
-              until wget -qO- http://cache:8080/; do
+              until wget -qO- http://cache:8080/healthz; do
                 echo "waiting for cache server..."
                 sleep 2
               done
       containers:
         - name: runner
-          image: node:20-slim
+          image: nx-runner:ci
+          imagePullPolicy: Never
           env:
             - name: NX_SELF_HOSTED_REMOTE_CACHE_SERVER
               value: http://cache:8080

@@ -18,6 +18,8 @@ const (
 	clusterName = "nx-cache-e2e"
 	namespace   = "e2e"
 	cacheImage  = "nx-cache-server:ci"
+	runnerImage = "nx-runner:ci"
+	busybox     = "busybox:stable"
 	cacheToken  = "ci-test-token"
 	manifests   = "../k8s/e2e"
 )
@@ -36,6 +38,8 @@ func TestMain(m *testing.M) {
 			kind.WithImage("kindest/node:v1.31.0"),
 		),
 		envfuncs.LoadImageToCluster(clusterName, cacheImage),
+		envfuncs.LoadImageToCluster(clusterName, runnerImage),
+		envfuncs.LoadImageToCluster(clusterName, busybox),
 		envfuncs.CreateNamespace(namespace),
 		createCacheSecret,
 		deployCacheServer,

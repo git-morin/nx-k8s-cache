@@ -158,6 +158,12 @@ jobs:
       - name: Build Docker image
         run: docker build -t nx-cache-server:ci .
 
+      - name: Build runner image
+        run: docker build -f Dockerfile.runner -t nx-runner:ci .
+
+      - name: Pull busybox
+        run: docker pull busybox:stable
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
