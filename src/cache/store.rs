@@ -6,6 +6,7 @@ pub trait CacheStore: Send + Sync {
     fn put(&self, hash: &str, data: &[u8]) -> Result<(), CacheError>;
     fn get(&self, hash: &str) -> Result<Vec<u8>, CacheError>;
     fn exists(&self, hash: &str) -> bool;
+    fn is_accessible(&self) -> bool;
 }
 
 pub struct DiskCache {
@@ -37,5 +38,9 @@ impl CacheStore for DiskCache {
 
     fn exists(&self, hash: &str) -> bool {
         Path::new(&self.cache_dir).join(hash).exists()
+    }
+
+    fn is_accessible(&self) -> bool {
+        Path::new(&self.cache_dir).is_dir()
     }
 }

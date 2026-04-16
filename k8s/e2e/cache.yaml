@@ -13,6 +13,7 @@ spec:
       labels:
         app: cache
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: cache
           image: nx-cache-server:ci
@@ -30,12 +31,27 @@ spec:
           volumeMounts:
             - name: cache-storage
               mountPath: /cache
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: 8080
             initialDelaySeconds: 1
             periodSeconds: 2
+            failureThreshold: 3
       volumes:
         - name: cache-storage
           emptyDir: {}
