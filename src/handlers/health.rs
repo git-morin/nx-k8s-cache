@@ -1,12 +1,12 @@
-use axum::{extract::State, http::StatusCode, routing::get, Router};
 use super::cache::AppState;
+use axum::{extract::State, http::StatusCode, routing::get, Router};
 
 async fn healthz() -> StatusCode {
     StatusCode::OK
 }
 
 async fn readyz(State(state): State<AppState>) -> StatusCode {
-    if state.store.is_accessible() {
+    if state.store.is_accessible().await {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE

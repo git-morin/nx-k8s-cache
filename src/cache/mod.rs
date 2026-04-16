@@ -1,4 +1,5 @@
-mod store;
 mod errors;
+mod store;
 
-pub use store::{CacheStore, DiskCache};
+pub use errors::CacheError;
+pub use store::{CacheStore, DiskCache, ObjectStoreCache};

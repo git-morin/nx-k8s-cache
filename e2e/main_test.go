@@ -21,7 +21,7 @@ const (
 	runnerImage = "nx-runner:ci"
 	busybox     = "busybox:stable"
 	cacheToken  = "ci-test-token"
-	manifests   = "../k8s/e2e"
+	manifests   = "manifests"
 )
 
 var testenv env.Environment
@@ -53,7 +53,6 @@ func TestMain(m *testing.M) {
 	os.Exit(testenv.Run(m))
 }
 
-// createCacheSecret injects the bearer token the cache server will validate.
 func createCacheSecret(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -65,7 +64,6 @@ func createCacheSecret(ctx context.Context, cfg *envconf.Config) (context.Contex
 	return ctx, cfg.Client().Resources().Create(ctx, secret)
 }
 
-// deployCacheServer applies the cache Deployment and Service from cache.yaml.
 func deployCacheServer(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
 	err := decoder.ApplyWithManifestDir(ctx, cfg.Client().Resources(), manifests, "cache.yaml", nil)
 	return ctx, err

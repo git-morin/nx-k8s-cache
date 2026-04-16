@@ -1,6 +1,8 @@
+mod auth;
 mod cache;
 mod health;
-mod auth;
+mod metrics;
 
-pub use cache::{cache_routes, AppState};
+pub use cache::{cache_routes, AppState, FailureTracker};
 pub use health::health_routes;
+pub use metrics::metrics_routes;
