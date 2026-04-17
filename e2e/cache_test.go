@@ -66,6 +66,9 @@ func TestCacheRoundTripHelm(t *testing.T) {
 			if _, err := createNs(ctx, cfg, helmNs); err != nil {
 				t.Fatalf("create namespace: %v", err)
 			}
+			if err := createCacheSecret(ctx, cfg, helmNs); err != nil {
+				t.Fatalf("create cache secret: %v", err)
+			}
 			if err := helmInstall(cfg, release, helmNs,
 				"fullnameOverride=cache",
 				"security.level=standard",
