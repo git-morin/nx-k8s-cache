@@ -28,6 +28,7 @@ jobs:
               - '.github/workflows/**'
             e2e:
               - 'e2e/**'
+              - 'deploy/helm/**'
               - 'Dockerfile'
               - 'Dockerfile.runner'
               - '.github/workflows/**'
@@ -184,6 +185,8 @@ jobs:
 
       - name: Pull busybox
         run: docker pull busybox:stable
+
+      - uses: azure/setup-helm@v4
 
       - uses: actions/setup-go@v5
         with:

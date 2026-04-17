@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nx-k8s-cache
+description: Self-hosted Nx remote cache server for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "latest"

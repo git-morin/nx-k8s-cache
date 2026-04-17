@@ -1,0 +1,54 @@
+image:
+  repository: ghcr.io/git-morin/nx-k8s-cache
+  tag: latest
+  pullPolicy: IfNotPresent
+
+security:
+  # One of: open, standard, hardened, paranoid
+  level: standard
+  # Static bearer token — required at standard and hardened levels.
+  token: ""
+  # Reference an existing Secret instead of creating one.
+  existingSecret: ""
+  existingSecretKey: token
+  # Comma-separated list of caller namespaces allowed at paranoid level.
+  # Empty means all namespaces are accepted.
+  allowedNamespaces: ""
+
+# ServiceAccount is required for the paranoid security level so the server
+# can call the Kubernetes TokenReview API. Ignored at all other levels.
+serviceAccount:
+  create: false
+  name: ""
+
+storage:
+  # disk — persist artifacts in a PersistentVolumeClaim.
+  # s3   — store artifacts in an S3-compatible bucket.
+  backend: disk
+  # Use an emptyDir instead of a PVC. Useful for testing; data is lost on
+  # pod restart. Only applies when backend is disk.
+  emptyDir: false
+  size: 10Gi
+  storageClassName: ""
+
+# S3 configuration — only used when storage.backend is s3.
+s3:
+  bucket: ""
+  endpoint: ""
+  region: ""
+  prefix: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+
+maxBodyMb: 512
+logFormat: json

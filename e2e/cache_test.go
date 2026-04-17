@@ -19,48 +19,104 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/features"
 )
 
+// TestCacheRoundTrip deploys the cache server using the raw Kubernetes
+// manifests from e2e/manifests/ and verifies a full Nx remote-cache
+// round-trip: first build populates the cache, second build restores from it.
 func TestCacheRoundTrip(t *testing.T) {
-	feat := features.New("nx remote cache round-trip").
+	feat := features.New("nx remote cache round-trip (raw manifests)").
 		Setup(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			// Block until the cache Deployment is Available before running any test.
-			err := wait.For(
+			if err := createCacheSecret(ctx, cfg, namespace); err != nil {
+				t.Fatalf("create cache secret: %v", err)
+			}
+			if err := decoder.ApplyWithManifestDir(ctx, cfg.Client().Resources(), manifests, "cache.yaml", nil); err != nil {
+				t.Fatalf("apply cache.yaml: %v", err)
+			}
+			if err := wait.For(
 				conditions.New(cfg.Client().Resources()).DeploymentAvailable("cache", namespace),
 				wait.WithTimeout(2*time.Minute),
-			)
-			if err != nil {
+			); err != nil {
 				t.Fatalf("cache deployment not ready: %v", err)
 			}
 			return ctx
 		}).
 		Assess("runner job completes and confirms remote cache hit", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			if err := decoder.ApplyWithManifestDir(ctx, cfg.Client().Resources(), manifests, "runner.yaml", nil); err != nil {
-				t.Fatalf("apply runner.yaml: %v", err)
-			}
-
-			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "runner", Namespace: namespace}}
-
-			// Wait for the job to finish. jobFinished fails fast on job failure
-			// rather than waiting for the full timeout to expire.
-			err := wait.For(
-				jobFinished(cfg, job),
-				wait.WithTimeout(10*time.Minute),
-			)
-
-			// Print logs regardless of outcome so CI always has the output.
-			printRunnerLogs(ctx, t, cfg)
-
-			if err != nil {
-				t.Fatalf("runner job did not succeed: %v", err)
-			}
-			return ctx
+			return runRunnerJob(ctx, t, cfg, namespace)
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 			_ = decoder.DeleteWithManifestDir(ctx, cfg.Client().Resources(), manifests, "runner.yaml", nil)
+			_ = decoder.DeleteWithManifestDir(ctx, cfg.Client().Resources(), manifests, "cache.yaml", nil)
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "cache-secret", Namespace: namespace}}
+			_ = cfg.Client().Resources().Delete(ctx, secret)
 			return ctx
 		}).
 		Feature()
 
 	testenv.Test(t, feat)
+}
+
+// TestCacheRoundTripHelm deploys the cache server using the Helm chart and
+// verifies the same round-trip. This test exercises the chart on top of the
+// raw-manifest test to validate both deployment methods.
+func TestCacheRoundTripHelm(t *testing.T) {
+	const release = "nx-cache-helm"
+	const helmNs = "e2e-helm"
+
+	feat := features.New("nx remote cache round-trip (Helm chart)").
+		Setup(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			if _, err := createNs(ctx, cfg, helmNs); err != nil {
+				t.Fatalf("create namespace: %v", err)
+			}
+			if err := createCacheSecret(ctx, cfg, helmNs); err != nil {
+				t.Fatalf("create cache secret: %v", err)
+			}
+			if err := helmInstall(cfg, release, helmNs,
+				"fullnameOverride=cache",
+				"security.level=standard",
+				"security.token="+cacheToken,
+			); err != nil {
+				t.Fatalf("helm install: %v", err)
+			}
+			return ctx
+		}).
+		Assess("runner job completes and confirms remote cache hit", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			return runRunnerJob(ctx, t, cfg, helmNs)
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			_ = decoder.DeleteWithManifestDir(ctx, cfg.Client().Resources(), manifests, "runner.yaml", nil)
+			_ = helmUninstall(cfg, release, helmNs)
+			_, _ = deleteNs(ctx, cfg, helmNs)
+			return ctx
+		}).
+		Feature()
+
+	testenv.Test(t, feat)
+}
+
+// runRunnerJob applies runner.yaml in the given namespace, waits for the Job
+// to complete, and prints runner logs. Shared by both round-trip tests.
+func runRunnerJob(ctx context.Context, t *testing.T, cfg *envconf.Config, ns string) context.Context {
+	t.Helper()
+
+	// runner.yaml hard-codes namespace "e2e"; patch on the fly if needed.
+	if err := applyRunnerJob(ctx, cfg, ns); err != nil {
+		t.Fatalf("apply runner job: %v", err)
+	}
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "runner", Namespace: ns}}
+	err := wait.For(jobFinished(cfg, job), wait.WithTimeout(10*time.Minute))
+	printRunnerLogs(ctx, t, cfg, ns)
+	if err != nil {
+		t.Fatalf("runner job did not succeed: %v", err)
+	}
+	return ctx
+}
+
+// applyRunnerJob creates the runner Job directly (so we can set the namespace
+// dynamically) rather than relying on the namespace hard-coded in runner.yaml.
+func applyRunnerJob(ctx context.Context, cfg *envconf.Config, ns string) error {
+	return decoder.ApplyWithManifestDir(ctx, cfg.Client().Resources(), manifests, "runner.yaml", nil,
+		decoder.MutateNamespace(ns),
+	)
 }
 
 // jobFinished is a wait condition that resolves true on JobComplete and
@@ -89,7 +145,7 @@ func jobFinished(cfg *envconf.Config, job *batchv1.Job) func(ctx context.Context
 
 // printRunnerLogs streams logs from every container in each runner pod to
 // stdout. Called both on success and failure so CI always has a trace.
-func printRunnerLogs(ctx context.Context, t *testing.T, cfg *envconf.Config) {
+func printRunnerLogs(ctx context.Context, t *testing.T, cfg *envconf.Config, ns string) {
 	t.Helper()
 
 	cs, err := kubernetes.NewForConfig(cfg.Client().RESTConfig())
@@ -98,7 +154,7 @@ func printRunnerLogs(ctx context.Context, t *testing.T, cfg *envconf.Config) {
 		return
 	}
 
-	pods, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+	pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 		LabelSelector: "job-name=runner",
 	})
 	if err != nil || len(pods.Items) == 0 {
@@ -108,12 +164,12 @@ func printRunnerLogs(ctx context.Context, t *testing.T, cfg *envconf.Config) {
 
 	for _, pod := range pods.Items {
 		for _, container := range []string{"wait-for-cache", "runner"} {
-			req := cs.CoreV1().Pods(namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+			req := cs.CoreV1().Pods(ns).GetLogs(pod.Name, &corev1.PodLogOptions{
 				Container: container,
 			})
 			stream, err := req.Stream(ctx)
 			if err != nil {
-				continue // container may not have started
+				continue
 			}
 			defer stream.Close()
 			fmt.Fprintf(os.Stdout, "\n=== %s / %s ===\n", pod.Name, container)
