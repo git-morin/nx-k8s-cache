@@ -1,0 +1,25 @@
+name: Open release PR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Open PR from dev to main
+        run: |
+          gh pr create \
+            --base main \
+            --head dev \
+            --title "chore: release" \
+            --body "Release PR opened from \`dev\` to \`main\`." \
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
