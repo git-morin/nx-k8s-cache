@@ -17,12 +17,8 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-// ── Rate limiter (Paranoid level only) ───────────────────────────────────────
-
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 const RATE_MAX_FAILURES: u32 = 10;
-
-// (failure_count, window_start)
 pub type FailureTracker = Arc<Mutex<HashMap<IpAddr, (u32, Instant)>>>;
 
 async fn is_rate_limited(tracker: &FailureTracker, ip: IpAddr) -> bool {
@@ -41,13 +37,10 @@ async fn record_failure(tracker: &FailureTracker, ip: IpAddr) {
     }
     entry.0 += 1;
 
-    // Evict stale entries to prevent unbounded growth under sustained attacks.
     if map.len() > 10_000 {
         map.retain(|_, (_, start)| start.elapsed() < RATE_WINDOW);
     }
 }
-
-// ── State ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
@@ -63,15 +56,11 @@ pub struct AppState {
     pub allowed_namespaces: Vec<String>,
 }
 
-// ── Validation ───────────────────────────────────────────────────────────────
-
 /// Hash must be a non-empty hex string, max 128 chars.
 /// Prevents path traversal and rejects malformed requests before any I/O.
 fn is_valid_hash(hash: &str) -> bool {
     !hash.is_empty() && hash.len() <= 128 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
-
-// ── Auth helper ──────────────────────────────────────────────────────────────
 
 /// Runs the appropriate auth check for the current security level and returns
 /// `Some(response)` to reject the request, or `None` to let it through.
@@ -81,7 +70,6 @@ async fn enforce_auth(
     client_ip: IpAddr,
     op: &str,
 ) -> Option<Response> {
-    // Rate-limit check before auth so we don't leak timing info (Paranoid).
     if let Some(tracker) = &state.failure_tracker {
         if is_rate_limited(tracker, client_ip).await {
             CACHE_OPS.with_label_values(&[op, "rate_limited"]).inc();
@@ -101,6 +89,7 @@ async fn enforce_auth(
     match outcome {
         AuthOutcome::Allowed => None,
         AuthOutcome::Unauthorized => {
+            tracing::info!(op, %client_ip, "request rejected: missing authorization");
             CACHE_OPS.with_label_values(&[op, "unauthorized"]).inc();
             Some((StatusCode::UNAUTHORIZED, "Missing authorization header").into_response())
         }
@@ -108,6 +97,7 @@ async fn enforce_auth(
             if let Some(tracker) = &state.failure_tracker {
                 record_failure(tracker, client_ip).await;
             }
+            tracing::info!(op, %client_ip, "request rejected: forbidden");
             CACHE_OPS.with_label_values(&[op, "forbidden"]).inc();
             Some((StatusCode::FORBIDDEN, "Forbidden").into_response())
         }
@@ -119,8 +109,6 @@ async fn enforce_auth(
     }
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
-
 pub async fn put_handler(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
@@ -128,16 +116,17 @@ pub async fn put_handler(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
+    let client_ip = addr.ip();
     if !is_valid_hash(&hash) {
+        tracing::info!(%client_ip, hash, "put rejected: invalid hash");
         CACHE_OPS.with_label_values(&["put", "invalid"]).inc();
         return (StatusCode::BAD_REQUEST, "Invalid cache hash").into_response();
     }
 
-    if let Some(r) = enforce_auth(&state, &headers, addr.ip(), "put").await {
+    if let Some(r) = enforce_auth(&state, &headers, client_ip, "put").await {
         return r;
     }
 
-    // Content-Length validation at Hardened and above.
     if state.security >= SecurityLevel::Hardened {
         if let Some(cl) = headers.get(header::CONTENT_LENGTH) {
             if let Ok(declared) = cl.to_str().unwrap_or("").parse::<usize>() {
@@ -149,12 +138,15 @@ pub async fn put_handler(
         }
     }
 
+    let body_len = body.len();
     match state.store.put(&hash, body).await {
         Ok(_) => {
+            tracing::info!(%client_ip, hash, bytes = body_len, "cache put: stored");
             CACHE_OPS.with_label_values(&["put", "stored"]).inc();
             StatusCode::OK.into_response()
         }
         Err(CacheError::AlreadyExists(_)) => {
+            tracing::info!(%client_ip, hash, "cache put: already exists");
             CACHE_OPS.with_label_values(&["put", "conflict"]).inc();
             StatusCode::CONFLICT.into_response()
         }
@@ -172,17 +164,20 @@ pub async fn get_handler(
     Path(hash): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> Response {
+    let client_ip = addr.ip();
     if !is_valid_hash(&hash) {
+        tracing::info!(%client_ip, hash, "get rejected: invalid hash");
         CACHE_OPS.with_label_values(&["get", "invalid"]).inc();
         return (StatusCode::BAD_REQUEST, "Invalid cache hash").into_response();
     }
 
-    if let Some(r) = enforce_auth(&state, &headers, addr.ip(), "get").await {
+    if let Some(r) = enforce_auth(&state, &headers, client_ip, "get").await {
         return r;
     }
 
     match state.store.get(&hash).await {
         Ok(data) => {
+            tracing::info!(%client_ip, hash, bytes = data.len(), "cache get: hit");
             CACHE_OPS.with_label_values(&["get", "hit"]).inc();
             Response::builder()
                 .status(StatusCode::OK)
@@ -191,10 +186,12 @@ pub async fn get_handler(
                 .unwrap()
         }
         Err(CacheError::NotFound(_)) => {
+            tracing::info!(%client_ip, hash, "cache get: miss");
             CACHE_OPS.with_label_values(&["get", "miss"]).inc();
             StatusCode::NOT_FOUND.into_response()
         }
         Err(CacheError::Corrupted(_)) => {
+            tracing::info!(%client_ip, hash, "cache get: corrupted entry");
             CACHE_OPS.with_label_values(&["get", "corrupted"]).inc();
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }

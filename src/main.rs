@@ -18,7 +18,6 @@ async fn main() {
     init_logging(&config.log_format);
     metrics::init();
 
-    // Cluster detection — required at Paranoid, advisory at other levels.
     if config.security >= SecurityLevel::Paranoid {
         k8s::assert_in_cluster();
     } else if k8s::is_in_cluster() {
@@ -27,7 +26,6 @@ async fn main() {
         tracing::warn!("not running inside a Kubernetes cluster — k8s auth unavailable");
     }
 
-    // k8s client is only created (and required) at the Paranoid level.
     let k8s_client: Option<kube::Client> = if config.security >= SecurityLevel::Paranoid {
         Some(
             kube::Client::try_default()
