@@ -1,0 +1,97 @@
+{{- $level := .Values.security.level }}
+{{- $diskBackend := eq .Values.storage.backend "disk" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nx-k8s-cache.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nx-k8s-cache.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "nx-k8s-cache.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nx-k8s-cache.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "nx-k8s-cache.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: nx-k8s-cache
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: NX_CACHE_SECURITY_LEVEL
+              value: {{ $level | quote }}
+            - name: NX_CACHE_BACKEND
+              value: {{ .Values.storage.backend | quote }}
+            - name: NX_CACHE_DIR
+              value: /cache
+            - name: NX_MAX_BODY_MB
+              value: {{ .Values.maxBodyMb | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat | quote }}
+            {{- if .Values.security.allowedNamespaces }}
+            - name: NX_ALLOWED_NAMESPACES
+              value: {{ .Values.security.allowedNamespaces | quote }}
+            {{- end }}
+            {{- if and (ne $level "open") (ne $level "paranoid") }}
+            - name: NX_CACHE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nx-k8s-cache.tokenSecretName" . }}
+                  key: {{ .Values.security.existingSecretKey | default "token" }}
+            {{- end }}
+            {{- if eq .Values.storage.backend "s3" }}
+            - name: NX_S3_BUCKET
+              value: {{ required "s3.bucket is required when storage.backend is s3" .Values.s3.bucket | quote }}
+            {{- if .Values.s3.endpoint }}
+            - name: NX_S3_ENDPOINT
+              value: {{ .Values.s3.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.s3.region }}
+            - name: NX_S3_REGION
+              value: {{ .Values.s3.region | quote }}
+            {{- end }}
+            {{- if .Values.s3.prefix }}
+            - name: NX_S3_PREFIX
+              value: {{ .Values.s3.prefix | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if $diskBackend }}
+          volumeMounts:
+            - name: cache-storage
+              mountPath: /cache
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if $diskBackend }}
+      volumes:
+        - name: cache-storage
+          {{- if .Values.storage.emptyDir }}
+          emptyDir: {}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "nx-k8s-cache.fullname" . }}
+          {{- end }}
+      {{- end }}
