@@ -46,10 +46,10 @@ check_code() {
   auth="$2"
   if [ -n "$auth" ]; then
     raw=$(printf 'GET /v1/cache/deadbeef00 HTTP/1.1\r\nHost: cache\r\nAuthorization: %s\r\nConnection: close\r\n\r\n' "$auth" \
-      | nc cache 8080 2>/dev/null | head -1)
+      | nc -w 10 cache 8080 2>/dev/null | head -1)
   else
     raw=$(printf 'GET /v1/cache/deadbeef00 HTTP/1.1\r\nHost: cache\r\nConnection: close\r\n\r\n' \
-      | nc cache 8080 2>/dev/null | head -1)
+      | nc -w 10 cache 8080 2>/dev/null | head -1)
   fi
   code=$(echo "$raw" | awk '{print $2}')
   if [ "$code" = "$expected" ]; then
