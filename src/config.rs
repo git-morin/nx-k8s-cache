@@ -114,7 +114,7 @@ pub struct Config {
     pub access_token: String,
     /// Storage backend and its settings.
     pub backend: CacheBackend,
-    /// Local cache directory — used only when backend = disk.
+    /// Local cache directory (used only when backend = disk).
     pub cache_dir: String,
     pub max_body_bytes: usize,
     pub log_format: String,
@@ -129,8 +129,6 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Self {
         let security = SecurityLevel::from_env();
-
-        // Static token is required at Standard and Hardened, optional elsewhere.
         let access_token = match security {
             SecurityLevel::Standard | SecurityLevel::Hardened => std::env::var("NX_CACHE_TOKEN")
                 .expect("NX_CACHE_TOKEN must be set for standard / hardened security levels"),

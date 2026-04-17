@@ -1,8 +1,6 @@
 use k8s_openapi::api::authentication::v1::{TokenReview, TokenReviewSpec};
 use kube::{api::PostParams, Api, Client};
 
-// ── SA file paths (overridable for testing) ───────────────────────────────────
-
 pub fn sa_token_path() -> String {
     std::env::var("NX_SA_TOKEN_PATH")
         .unwrap_or_else(|_| "/var/run/secrets/kubernetes.io/serviceaccount/token".to_string())
@@ -12,8 +10,6 @@ pub fn sa_namespace_path() -> String {
     std::env::var("NX_SA_NAMESPACE_PATH")
         .unwrap_or_else(|_| "/var/run/secrets/kubernetes.io/serviceaccount/namespace".to_string())
 }
-
-// ── Cluster detection ─────────────────────────────────────────────────────────
 
 /// Returns true when the two canonical in-cluster markers are present:
 /// the `KUBERNETES_SERVICE_HOST` env var and the mounted SA token file.
@@ -45,8 +41,6 @@ pub fn server_namespace() -> String {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "default".to_string())
 }
-
-// ── TokenReview ───────────────────────────────────────────────────────────────
 
 pub enum ReviewOutcome {
     /// Token is valid, SA is in an allowed namespace.
@@ -93,8 +87,7 @@ pub async fn review_token(
         return ReviewOutcome::Unauthenticated;
     }
 
-    // SA token usernames follow the format:
-    //   system:serviceaccount:<namespace>:<name>
+    //system:serviceaccount:<namespace>:<name>
     let username = status.user.and_then(|u| u.username).unwrap_or_default();
 
     let parts: Vec<&str> = username.splitn(4, ':').collect();

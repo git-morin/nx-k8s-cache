@@ -5,12 +5,10 @@ use subtle::ConstantTimeEq;
 
 pub enum AuthOutcome {
     Allowed,
-    Unauthorized,     // token missing
-    Forbidden,        // token present but wrong / wrong namespace
-    ApiError(String), // k8s API unreachable (paranoid only)
+    Unauthorized,     
+    Forbidden,       
+    ApiError(String),
 }
-
-/// Extracts the bare token from `Authorization: Bearer <token>`.
 pub fn extract_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::AUTHORIZATION)
@@ -20,9 +18,6 @@ pub fn extract_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Static token check for Standard / Hardened levels.
-/// - Standard  → plain `==` (convenient)
-/// - Hardened  → constant-time comparison (timing-safe)
 pub fn check_static_auth(headers: &HeaderMap, expected: &str, level: SecurityLevel) -> AuthOutcome {
     if level == SecurityLevel::Open {
         return AuthOutcome::Allowed;
