@@ -2,12 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Dockerfile'
+              - '.github/workflows/**'
+            e2e:
+              - 'e2e/**'
+              - 'Dockerfile'
+              - 'Dockerfile.runner'
+              - '.github/workflows/**'
+
   unit:
-    name: unit-test
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
 
     env:
@@ -16,11 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -29,11 +51,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build cache server
+      - name: Build
         run: cargo build --release
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -92,7 +113,7 @@ jobs:
             sleep 1
           done
 
-      - name: First build — populates remote cache
+      - name: First build (populate remote cache)
         working-directory: test-workspace
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://localhost:8080
@@ -100,7 +121,7 @@ jobs:
           NX_DAEMON: "false"
         run: npx nx build myapp
 
-      - name: Verify entry was stored on server
+      - name: Verify cache entry was stored
         run: |
           count=$(ls /tmp/nx-cache | wc -l)
           echo "Remote cache entries: $count"
@@ -112,7 +133,7 @@ jobs:
           npx nx reset
           rm -rf apps/myapp/dist
 
-      - name: Second build — should restore from remote cache
+      - name: Second build (restore from remote cache)
         working-directory: test-workspace
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://localhost:8080
@@ -127,9 +148,9 @@ jobs:
         run: kill $CACHE_SERVER_PID 2>/dev/null || true
 
   e2e:
-    name: e2e-test
+    needs: [changes, unit]
+    if: always() && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.e2e == 'true') && (needs.unit.result == 'success' || needs.unit.result == 'skipped')
     runs-on: ubuntu-latest
-    needs: unit
 
     steps:
       - uses: actions/checkout@v4
@@ -137,13 +158,11 @@ jobs:
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -155,32 +174,57 @@ jobs:
       - name: Build static binary
         run: cargo build --release --target x86_64-unknown-linux-musl
 
-      - name: Build Docker image
-        run: docker build -t nx-cache-server:ci .
-
-      - name: Build runner image
-        run: docker build -f Dockerfile.runner -t nx-runner:ci .
+      - name: Build Docker images
+        run: |
+          docker build -t nx-cache-server:ci .
+          docker build -f Dockerfile.runner -t nx-runner:ci .
 
       - name: Pull busybox
         run: docker pull busybox:stable
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache-dependency-path: e2e/go.mod
 
-      - name: Run k8s tests
+      - name: Run k8s e2e tests
         working-directory: e2e
         run: |
           go mod tidy
           go test ./... -v -count=1 -timeout 20m
 
-  publish:
-    name: publish-image
+  release:
+    needs: [changes, unit, e2e]
+    if: always() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && (needs.unit.result == 'success' || needs.unit.result == 'skipped') && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     runs-on: ubuntu-latest
-    needs: [unit, e2e]
-    if: github.ref == 'refs/heads/main'
+    outputs:
+      released: ${{ steps.release.outputs.new_release_published }}
+      version: ${{ steps.release.outputs.new_release_version }}
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: cycjimmy/semantic-release-action@v4
+        id: release
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
@@ -192,13 +236,11 @@ jobs:
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -210,24 +252,22 @@ jobs:
       - name: Build static binary
         run: cargo build --release --target x86_64-unknown-linux-musl
 
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
+      - uses: docker/metadata-action@v5
         id: meta
-        uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/nx-k8s-cache
           tags: |
-            type=raw,value=latest
-            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=${{ needs.release.outputs.version }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           push: true

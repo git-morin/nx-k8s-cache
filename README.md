@@ -2,13 +2,15 @@
 
 A self-hosted remote cache server for [Nx](https://nx.dev) monorepos, built with Rust and designed to run in Kubernetes.
 
+> **Scope:** this project is intended for internal CI pipelines on trusted private networks. If you need a cache server exposed to the public internet or shared across untrusted tenants, use [Nx Cloud](https://nx.app) instead.
+
 ## How it works
 
-Nx 20.8+ supports custom remote cache servers via a simple HTTP API. This server implements that spec — tasks are stored and retrieved by hash, protected by a bearer token.
+Nx 20.8+ supports custom remote cache servers via a simple HTTP API. This server implements that spec: tasks are stored and retrieved by hash, protected by a bearer token.
 
 ## Usage
 
-### Nx workspace configuration
+### Nx workspace
 
 ```bash
 NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://<host>:8080
@@ -31,43 +33,57 @@ Apply the manifests from `e2e/manifests/` as a starting point, then create a sec
 kubectl create secret generic cache-secret --from-literal=token=<your-token>
 ```
 
+### Local development
+
+```bash
+NX_CACHE_TOKEN=<secret> cargo run
+```
+
 ## Configuration
 
-| Variable | Default | Description |
-|---|---|---|
-| `NX_CACHE_TOKEN` | required¹ | Bearer token Nx clients must present |
-| `NX_CACHE_DIR` | `/var/cache/nx` | Directory where cache artifacts are stored |
-| `NX_CACHE_SECURITY_LEVEL` | `standard` | Security level: `open`, `standard`, `hardened`, `paranoid` |
-| `NX_MAX_BODY_MB` | `512` | Maximum upload size in MiB |
-| `LOG_FORMAT` | text | Set to `json` for structured output |
+| Variable                  | Default         | Description                                                   |
+| ------------------------- | --------------- | ------------------------------------------------------------- |
+| `NX_CACHE_TOKEN`          | required*       | Bearer token Nx clients must present                          |
+| `NX_CACHE_DIR`            | `/var/cache/nx` | Directory where cache artifacts are stored                    |
+| `NX_CACHE_BACKEND`        | `disk`          | Storage backend: `disk` or `s3`                               |
+| `NX_S3_BUCKET`            | required for s3 | S3 bucket name                                                |
+| `NX_S3_ENDPOINT`          |                 | Custom S3 endpoint (e.g. MinIO)                               |
+| `NX_S3_REGION`            |                 | AWS region                                                    |
+| `NX_S3_PREFIX`            |                 | Key prefix for all objects                                    |
+| `NX_CACHE_SECURITY_LEVEL` | `standard`      | Security level: `open`, `standard`, `hardened`, `paranoid`    |
+| `NX_ALLOWED_NAMESPACES`   |                 | Comma-separated list of allowed namespaces (paranoid only)    |
+| `NX_MAX_BODY_MB`          | `512`           | Maximum upload size in MiB                                    |
+| `LOG_FORMAT`              | text            | Set to `json` for structured output                           |
 
-¹ Optional at level `open`, required at all other levels.
+\* Optional at level `open`, required at all other levels.
+
+**S3:** when `NX_CACHE_BACKEND=s3`, credentials are read from standard AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) or a pod workload identity.
 
 ## Security levels
 
-| Level | Auth | Write-once | SHA-256 integrity | Rate limiting |
-|---|---|---|---|---|
-| `open` (0) | none | | | |
-| `standard` (1) | bearer token | ✓ | | |
-| `hardened` (2) | bearer, constant-time | ✓ | ✓ | |
-| `paranoid` (3) | bearer, constant-time | ✓ | ✓ | 10 failures / 60 s / IP |
+| Level          | Auth                  | Write-once | SHA-256 integrity | Rate limiting            |
+| -------------- | --------------------- | ---------- | ----------------- | ------------------------ |
+| `open` (0)     | none                  |            |                   |                          |
+| `standard` (1) | bearer token          | yes        |                   |                          |
+| `hardened` (2) | bearer, constant-time | yes        | yes               |                          |
+| `paranoid` (3) | k8s SA token review   | yes        | yes               | 10 failures / 60 s / IP  |
 
-**open** — no authentication, artifacts can be overwritten. For local development or fully trusted private networks.
+**open:** no authentication, artifacts can be overwritten. Only appropriate for local development or fully trusted isolated networks.
 
-**standard** — bearer token required, each hash can only be written once. Suitable for internal CI.
+**standard:** bearer token required, each hash can only be written once. Suitable for internal CI on a private cluster.
 
-**hardened** — constant-time token comparison (timing-safe), SHA-256 sidecar stored on every PUT and verified on every GET (detects bit-rot and filesystem tampering), Content-Length validated. Suitable for shared or multi-team infrastructure.
+**hardened:** constant-time token comparison, SHA-256 sidecar stored on every PUT and verified on every GET (detects bit-rot and filesystem tampering), Content-Length validated. Suitable for shared or multi-team infrastructure.
 
-**paranoid** — everything in hardened plus a minimum token length of 32 characters and per-IP rate limiting on auth failures. Suitable for internet-facing deployments. Token minimum is enforced at startup.
+**paranoid:** k8s service account tokens validated via the TokenReview API, namespace allowlist enforced, and per-IP rate limiting on auth failures. Requires running inside a Kubernetes cluster.
 
 ## API
 
-| Method | Path | Description |
-|---|---|---|
-| `PUT` | `/v1/cache/{hash}` | Store a task artifact |
-| `GET` | `/v1/cache/{hash}` | Retrieve a task artifact |
-| `GET` | `/healthz` | Liveness probe |
-| `GET` | `/readyz` | Readiness probe (checks cache dir is accessible) |
-| `GET` | `/metrics` | Prometheus metrics |
+| Method | Path               | Description                                      |
+| ------ | ------------------ | ------------------------------------------------ |
+| `PUT`  | `/v1/cache/{hash}` | Store a task artifact                            |
+| `GET`  | `/v1/cache/{hash}` | Retrieve a task artifact                         |
+| `GET`  | `/healthz`         | Liveness probe                                   |
+| `GET`  | `/readyz`          | Readiness probe (checks cache dir is accessible) |
+| `GET`  | `/metrics`         | Prometheus metrics                               |
 
 All cache endpoints require `Authorization: Bearer <token>` at security level `standard` and above.
