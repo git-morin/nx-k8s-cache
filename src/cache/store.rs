@@ -9,16 +9,12 @@ use std::{
 };
 use tokio::{fs, io::AsyncWriteExt};
 
-// ── Trait ─────────────────────────────────────────────────────────────────────
-
 #[async_trait]
 pub trait CacheStore: Send + Sync {
     async fn put(&self, hash: &str, data: Bytes) -> Result<(), CacheError>;
     async fn get(&self, hash: &str) -> Result<Bytes, CacheError>;
     async fn is_accessible(&self) -> bool;
 }
-
-// ── Shared integrity helper ───────────────────────────────────────────────────
 
 fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
@@ -38,8 +34,6 @@ fn integrity_ok(hash: &str, data: &[u8], expected: &str) -> bool {
     );
     false
 }
-
-// ── DiskCache ─────────────────────────────────────────────────────────────────
 
 pub struct DiskCache {
     cache_dir: String,
@@ -146,11 +140,8 @@ impl CacheStore for DiskCache {
     }
 }
 
-// ── ObjectStoreCache ──────────────────────────────────────────────────────────
-
 pub struct ObjectStoreCache {
     store: Arc<dyn ObjectStore>,
-    /// Optional key prefix (e.g. `"nx-cache"`) applied to every object path.
     prefix: String,
     write_once: bool,
     verify_integrity: bool,
@@ -277,7 +268,6 @@ impl CacheStore for ObjectStoreCache {
     }
 
     async fn is_accessible(&self) -> bool {
-        // NotFound means the store is reachable but the object doesn't exist — that's fine.
         match self.store.head(&StorePath::from("__nx_healthz")).await {
             Ok(_) | Err(object_store::Error::NotFound { .. }) => true,
             Err(_) => false,
