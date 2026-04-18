@@ -3,6 +3,12 @@ name: Publish
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -15,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
 
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -47,9 +53,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/nx-k8s-cache
           tags: |
-            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
+            type=raw,value=latest,enable=${{ !github.event.release.prerelease && inputs.tag == '' }}
             type=raw,value=dev,enable=${{ github.event.release.prerelease }}
-            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.event.release.tag_name }}
 
       - uses: docker/build-push-action@v6
         with:
