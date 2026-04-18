@@ -54,7 +54,7 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/nx-k8s-cache
           tags: |
             type=raw,value=latest,enable=${{ !github.event.release.prerelease && inputs.tag == '' }}
-            type=raw,value=dev,enable=${{ github.event.release.prerelease }}
+            type=raw,value=dev,enable=${{ github.event.release.prerelease == true }}
             type=semver,pattern={{version}},value=${{ inputs.tag || github.event.release.tag_name }}
 
       - uses: docker/build-push-action@v6
