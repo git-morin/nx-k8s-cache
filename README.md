@@ -1,5 +1,10 @@
 # nx-k8s-cache
 
+[![CI](https://github.com/git-morin/nx-k8s-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/git-morin/nx-k8s-cache/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/git-morin/nx-k8s-cache)](https://github.com/git-morin/nx-k8s-cache/releases/latest)
+[![Docker](https://img.shields.io/badge/ghcr.io-nx--k8s--cache-blue?logo=docker)](https://github.com/git-morin/nx-k8s-cache/pkgs/container/nx-k8s-cache)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 A self-hosted remote cache server for [Nx](https://nx.dev) monorepos, built with Rust and designed to run in Kubernetes.
 
 > **Scope:** this project is intended for internal CI pipelines on trusted private networks. If you need a cache server exposed to the public internet or shared across untrusted tenants, use [Nx Cloud](https://nx.app) instead.
