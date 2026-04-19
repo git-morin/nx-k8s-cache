@@ -15,6 +15,9 @@ updates:
     groups:
       all:
         patterns: ["*"]
+    ignore:
+      - dependency-name: "k8s.io/*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
