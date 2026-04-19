@@ -19,7 +19,7 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.event.release.tag_name }}
 
@@ -30,7 +30,7 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -42,13 +42,13 @@ jobs:
       - name: Build static binary
         run: cargo build --release --target x86_64-unknown-linux-musl
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository_owner }}/nx-k8s-cache
@@ -57,7 +57,7 @@ jobs:
             type=raw,value=dev,enable=${{ github.event.release.prerelease == true || contains(inputs.tag, '-dev.') }}
             type=semver,pattern={{version}},value=${{ inputs.tag || github.event.release.tag_name }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
