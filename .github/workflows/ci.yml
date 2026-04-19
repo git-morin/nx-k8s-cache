@@ -188,7 +188,7 @@ jobs:
       - name: Pull busybox
         run: docker pull busybox:stable
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - uses: actions/setup-go@v5
         with:
