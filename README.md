@@ -76,6 +76,29 @@ NX_CACHE_TOKEN=<secret> cargo run
 
 **paranoid:** k8s service account tokens validated via the TokenReview API, namespace allowlist enforced, and per-IP rate limiting on auth failures. Requires running inside a Kubernetes cluster.
 
+## Helm
+
+The chart is located at `deploy/helm/nx-k8s-cache`. Install it directly from the repo:
+
+```bash
+helm install nx-k8s-cache ./deploy/helm/nx-k8s-cache \
+  --set security.token=<your-token>
+```
+
+Key values:
+
+| Value | Default | Description |
+| --- | --- | --- |
+| `security.level` | `standard` | Security level (see table above) |
+| `security.token` | `""` | Bearer token (or use `existingSecret`) |
+| `storage.backend` | `disk` | `disk` or `s3` |
+| `storage.size` | `10Gi` | PVC size (disk backend) |
+| `storage.emptyDir` | `false` | Use emptyDir instead of PVC (non-persistent) |
+| `s3.bucket` | `""` | S3 bucket name (s3 backend) |
+| `serviceAccount.create` | `false` | Required when using `paranoid` security level |
+
+See [`deploy/helm/nx-k8s-cache/values.yaml`](deploy/helm/nx-k8s-cache/values.yaml) for the full reference.
+
 ## API
 
 | Method | Path               | Description                                      |
