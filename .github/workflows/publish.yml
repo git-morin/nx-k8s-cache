@@ -57,7 +57,7 @@ jobs:
             type=raw,value=dev,enable=${{ github.event.release.prerelease == true || contains(inputs.tag, '-dev.') }}
             type=semver,pattern={{version}},value=${{ inputs.tag || github.event.release.tag_name }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
