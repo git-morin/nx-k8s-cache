@@ -37,10 +37,10 @@ go test ./... -v -count=1 -timeout 20m
 
 | Branch | Purpose |
 | --- | --- |
-| `main` | Stable releases |
-| `dev` | Preview releases (`-dev.N`) |
+| `dev` | Preview releases (`-dev.N`) — main integration branch |
+| `main` | Stable releases, promoted manually from `dev` |
 
-Work on feature branches cut from `main`. Open a PR targeting `main`.
+Work on feature branches cut from `dev`. Open a PR targeting `dev`.
 
 ## Commits
 
@@ -55,7 +55,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/). This drives
 
 ## Submitting a PR
 
-1. Fork the repo and create a branch from `main`.
+1. Fork the repo and create a branch from `dev`.
 2. Make sure `cargo test` passes.
-3. Open a PR. CI runs unit and e2e tests automatically.
+3. Open a PR targeting `dev`. CI runs unit and e2e tests automatically.
 4. A maintainer will review and squash-merge once approved.
