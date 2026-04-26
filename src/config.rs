@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Duration};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SecurityLevel {
@@ -42,6 +42,28 @@ impl fmt::Display for SecurityLevel {
             SecurityLevel::Hardened => write!(f, "hardened"),
             SecurityLevel::Paranoid => write!(f, "paranoid"),
         }
+    }
+}
+
+pub struct EvictionConfig {
+    pub ttl: Duration,
+    pub interval: Duration,
+}
+
+impl EvictionConfig {
+    fn from_env() -> Option<Self> {
+        let ttl_secs = std::env::var("NX_EVICTION_TTL_SECS")
+            .ok()?
+            .parse::<u64>()
+            .ok()?;
+        let interval_secs = std::env::var("NX_EVICTION_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(3600);
+        Some(EvictionConfig {
+            ttl: Duration::from_secs(ttl_secs),
+            interval: Duration::from_secs(interval_secs),
+        })
     }
 }
 
@@ -124,6 +146,7 @@ pub struct Config {
     /// Namespaces callers are allowed to originate from.
     /// Empty means all namespaces are accepted (Paranoid level only).
     pub allowed_namespaces: Vec<String>,
+    pub eviction: Option<EvictionConfig>,
 }
 
 impl Config {
@@ -169,6 +192,42 @@ impl Config {
             security,
             server_namespace: crate::k8s::server_namespace(),
             allowed_namespaces,
+            eviction: EvictionConfig::from_env(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn no_ttl_disables_eviction() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("NX_EVICTION_TTL_SECS");
+        assert!(EvictionConfig::from_env().is_none());
+    }
+
+    #[test]
+    fn ttl_only_uses_default_interval() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::set_var("NX_EVICTION_TTL_SECS", "86400");
+        std::env::remove_var("NX_EVICTION_INTERVAL_SECS");
+        let cfg = EvictionConfig::from_env().unwrap();
+        assert_eq!(cfg.ttl, Duration::from_secs(86400));
+        assert_eq!(cfg.interval, Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn custom_interval() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::set_var("NX_EVICTION_TTL_SECS", "3600");
+        std::env::set_var("NX_EVICTION_INTERVAL_SECS", "600");
+        let cfg = EvictionConfig::from_env().unwrap();
+        assert_eq!(cfg.ttl, Duration::from_secs(3600));
+        assert_eq!(cfg.interval, Duration::from_secs(600));
     }
 }
