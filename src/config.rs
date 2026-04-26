@@ -196,3 +196,38 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn no_ttl_disables_eviction() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("NX_EVICTION_TTL_SECS");
+        assert!(EvictionConfig::from_env().is_none());
+    }
+
+    #[test]
+    fn ttl_only_uses_default_interval() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::set_var("NX_EVICTION_TTL_SECS", "86400");
+        std::env::remove_var("NX_EVICTION_INTERVAL_SECS");
+        let cfg = EvictionConfig::from_env().unwrap();
+        assert_eq!(cfg.ttl, Duration::from_secs(86400));
+        assert_eq!(cfg.interval, Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn custom_interval() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::set_var("NX_EVICTION_TTL_SECS", "3600");
+        std::env::set_var("NX_EVICTION_INTERVAL_SECS", "600");
+        let cfg = EvictionConfig::from_env().unwrap();
+        assert_eq!(cfg.ttl, Duration::from_secs(3600));
+        assert_eq!(cfg.interval, Duration::from_secs(600));
+    }
+}

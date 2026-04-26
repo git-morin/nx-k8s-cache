@@ -330,3 +330,67 @@ impl CacheStore for ObjectStoreCache {
         Ok(artifact_count)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use std::time::Duration;
+
+    fn age_file(path: &std::path::Path, age: Duration) {
+        let old = SystemTime::now().checked_sub(age).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_modified(old)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn evict_removes_stale_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = DiskCache::new(dir.path().to_str().unwrap(), false, false);
+
+        cache.put("stale", Bytes::from_static(b"x")).await.unwrap();
+        age_file(&dir.path().join("stale"), Duration::from_secs(7200));
+        cache.put("fresh", Bytes::from_static(b"y")).await.unwrap();
+
+        let n = cache.evict_older_than(Duration::from_secs(3600)).await.unwrap();
+        assert_eq!(n, 1);
+        assert!(!dir.path().join("stale").exists());
+        assert!(dir.path().join("fresh").exists());
+    }
+
+    #[tokio::test]
+    async fn evict_removes_sidecar_with_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = DiskCache::new(dir.path().to_str().unwrap(), false, true);
+
+        cache.put("stale", Bytes::from_static(b"x")).await.unwrap();
+        age_file(&dir.path().join("stale"), Duration::from_secs(7200));
+
+        let n = cache.evict_older_than(Duration::from_secs(3600)).await.unwrap();
+        assert_eq!(n, 1);
+        assert!(!dir.path().join("stale").exists());
+        assert!(!dir.path().join("stale.sha256").exists());
+    }
+
+    #[tokio::test]
+    async fn evict_skips_fresh_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = DiskCache::new(dir.path().to_str().unwrap(), false, false);
+
+        cache.put("a", Bytes::from_static(b"x")).await.unwrap();
+        cache.put("b", Bytes::from_static(b"y")).await.unwrap();
+
+        let n = cache.evict_older_than(Duration::from_secs(3600)).await.unwrap();
+        assert_eq!(n, 0);
+        assert!(dir.path().join("a").exists());
+        assert!(dir.path().join("b").exists());
+    }
+
+    #[tokio::test]
+    async fn evict_empty_dir_returns_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = DiskCache::new(dir.path().to_str().unwrap(), false, false);
+        let n = cache.evict_older_than(Duration::from_secs(3600)).await.unwrap();
+        assert_eq!(n, 0);
+    }
+}
