@@ -1,11 +1,13 @@
 use super::errors::CacheError;
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::StreamExt;
 use object_store::{path::Path as StorePath, ObjectStore, ObjectStoreExt, PutMode, PutOptions};
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::SystemTime,
 };
 use tokio::{fs, io::AsyncWriteExt};
 
@@ -14,6 +16,7 @@ pub trait CacheStore: Send + Sync {
     async fn put(&self, hash: &str, data: Bytes) -> Result<(), CacheError>;
     async fn get(&self, hash: &str) -> Result<Bytes, CacheError>;
     async fn is_accessible(&self) -> bool;
+    async fn evict_older_than(&self, ttl: std::time::Duration) -> Result<u64, CacheError>;
 }
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -137,6 +140,30 @@ impl CacheStore for DiskCache {
             .await
             .map(|m| m.is_dir())
             .unwrap_or(false)
+    }
+
+    async fn evict_older_than(&self, ttl: std::time::Duration) -> Result<u64, CacheError> {
+        let cutoff = SystemTime::now()
+            .checked_sub(ttl)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let mut count = 0u64;
+        let mut rd = fs::read_dir(&self.cache_dir).await?;
+        while let Some(entry) = rd.next_entry().await? {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "sha256") {
+                continue;
+            }
+            let modified = match entry.metadata().await.and_then(|m| m.modified()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if modified <= cutoff {
+                let _ = fs::remove_file(&path).await;
+                let _ = fs::remove_file(path.with_extension("sha256")).await;
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 }
 
@@ -272,5 +299,34 @@ impl CacheStore for ObjectStoreCache {
             Ok(_) | Err(object_store::Error::NotFound { .. }) => true,
             Err(_) => false,
         }
+    }
+
+    async fn evict_older_than(&self, ttl: std::time::Duration) -> Result<u64, CacheError> {
+        let cutoff = SystemTime::now()
+            .checked_sub(ttl)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let prefix = if self.prefix.is_empty() {
+            None
+        } else {
+            Some(StorePath::from(self.prefix.as_str()))
+        };
+        let mut list = self.store.list(prefix.as_ref());
+        let mut to_delete: Vec<StorePath> = Vec::new();
+        let mut artifact_count = 0u64;
+        while let Some(result) = list.next().await {
+            let meta = result.map_err(CacheError::ObjectStore)?;
+            let last_mod: SystemTime = meta.last_modified.into();
+            if last_mod <= cutoff {
+                let is_sidecar: &str = meta.location.as_ref();
+                if !is_sidecar.ends_with(".sha256") {
+                    artifact_count += 1;
+                }
+                to_delete.push(meta.location);
+            }
+        }
+        for path in to_delete {
+            let _ = self.store.delete(&path).await;
+        }
+        Ok(artifact_count)
     }
 }

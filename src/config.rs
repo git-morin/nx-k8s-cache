@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Duration};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SecurityLevel {
@@ -42,6 +42,28 @@ impl fmt::Display for SecurityLevel {
             SecurityLevel::Hardened => write!(f, "hardened"),
             SecurityLevel::Paranoid => write!(f, "paranoid"),
         }
+    }
+}
+
+pub struct EvictionConfig {
+    pub ttl: Duration,
+    pub interval: Duration,
+}
+
+impl EvictionConfig {
+    fn from_env() -> Option<Self> {
+        let ttl_secs = std::env::var("NX_EVICTION_TTL_SECS")
+            .ok()?
+            .parse::<u64>()
+            .ok()?;
+        let interval_secs = std::env::var("NX_EVICTION_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(3600);
+        Some(EvictionConfig {
+            ttl: Duration::from_secs(ttl_secs),
+            interval: Duration::from_secs(interval_secs),
+        })
     }
 }
 
@@ -124,6 +146,7 @@ pub struct Config {
     /// Namespaces callers are allowed to originate from.
     /// Empty means all namespaces are accepted (Paranoid level only).
     pub allowed_namespaces: Vec<String>,
+    pub eviction: Option<EvictionConfig>,
 }
 
 impl Config {
@@ -169,6 +192,7 @@ impl Config {
             security,
             server_namespace: crate::k8s::server_namespace(),
             allowed_namespaces,
+            eviction: EvictionConfig::from_env(),
         }
     }
 }

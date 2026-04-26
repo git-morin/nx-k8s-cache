@@ -69,6 +69,24 @@ async fn main() {
         None
     };
 
+    if let Some(eviction) = config.eviction {
+        let store_evict = Arc::clone(&store);
+        tokio::spawn(async move {
+            tracing::info!(
+                ttl_secs = eviction.ttl.as_secs(),
+                interval_secs = eviction.interval.as_secs(),
+                "cache eviction task started"
+            );
+            loop {
+                tokio::time::sleep(eviction.interval).await;
+                match store_evict.evict_older_than(eviction.ttl).await {
+                    Ok(n) => tracing::info!(evicted = n, "cache eviction sweep complete"),
+                    Err(e) => tracing::error!(error = %e, "cache eviction sweep failed"),
+                }
+            }
+        });
+    }
+
     tracing::info!(
         addr = "0.0.0.0:8080",
         backend = %config.backend,
