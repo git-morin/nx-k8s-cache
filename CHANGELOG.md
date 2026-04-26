@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/git-morin/nx-k8s-cache/compare/v1.1.0...v1.2.0) (2026-04-26)
+
+
+### Features
+
+* add TTL-based cache eviction background job ([eac0dfd](https://github.com/git-morin/nx-k8s-cache/commit/eac0dfd44b458a2a48fa80721cc99909c35f1a08))
+
 # [1.1.0](https://github.com/git-morin/nx-k8s-cache/compare/v1.0.0...v1.1.0) (2026-04-17)
 
 
