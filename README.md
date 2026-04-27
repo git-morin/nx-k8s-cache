@@ -57,10 +57,24 @@ NX_CACHE_TOKEN=<secret> cargo run
 | `NX_S3_PREFIX`            |                 | Key prefix for all objects                                    |
 | `NX_CACHE_SECURITY_LEVEL` | `standard`      | Security level: `open`, `standard`, `hardened`, `paranoid`    |
 | `NX_ALLOWED_NAMESPACES`   |                 | Comma-separated list of allowed namespaces (paranoid only)    |
+| `NX_EVICTION_TTL_SECS`    |                 | Delete entries older than this many seconds (unset = disabled)|
+| `NX_EVICTION_INTERVAL_SECS` | `3600`        | How often the eviction sweep runs (seconds)                   |
 | `NX_MAX_BODY_MB`          | `512`           | Maximum upload size in MiB                                    |
 | `LOG_FORMAT`              | text            | Set to `json` for structured output                           |
 
 \* Optional at level `open`, required at all other levels.
+
+## Cache eviction
+
+By default cache entries are kept forever. Set `NX_EVICTION_TTL_SECS` to enable a background sweep that deletes artifacts older than the given age:
+
+```bash
+# Delete entries older than 7 days, sweep every 6 hours
+NX_EVICTION_TTL_SECS=604800
+NX_EVICTION_INTERVAL_SECS=21600
+```
+
+The sweep runs on both disk and S3 backends. SHA-256 sidecar files are removed alongside their artifacts.
 
 **S3:** when `NX_CACHE_BACKEND=s3`, credentials are read from standard AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) or a pod workload identity.
 
